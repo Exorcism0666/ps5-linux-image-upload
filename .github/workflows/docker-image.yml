@@ -1,0 +1,162 @@
+name: Build & Release PS5 Linux Images
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      distro:
+        description: 'Distribution to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - ubuntu2604
+          - ubuntu2404
+          - arch
+          - alpine
+          - all
+      tag_name:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  # Résout le tag selon le déclencheur (push tag ou dispatch manuel)
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Job de build : une matrice par distro, sauf si "all" est demandé
+  # ─────────────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJson(
+          (github.event_name == 'workflow_dispatch' && inputs.distro != 'all') &&
+            format('["{0}"]', inputs.distro) ||
+          '["ubuntu2604","ubuntu2404","arch","alpine"]'
+        ) }}
+
+    steps:
+      - name: Checkout ps5-linux-image
+        uses: actions/checkout@v4
+        with:
+          repository: ps5-linux/ps5-linux-image
+          path: ps5-linux-image
+
+      # Docker est déjà présent sur ubuntu-latest,
+      # mais on s'assure que le service tourne
+      - name: Set up Docker
+        run: |
+          sudo systemctl start docker || true
+          sudo usermod -aG docker $USER || true
+
+      # Le build nécessite ~30 Go ; on libère de l'espace d'abord
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: false
+
+      - name: Build image — ${{ matrix.distro }}
+        working-directory: ps5-linux-image
+        run: |
+          chmod +x ./build_image.sh
+          ./build_image.sh --distro ${{ matrix.distro }}
+
+      # Compresse l'image pour réduire la taille de l'artefact
+      - name: Compress image
+        working-directory: ps5-linux-image
+        run: |
+          IMGFILE="output/ps5-${{ matrix.distro }}.img"
+          echo "Compressing $IMGFILE..."
+          zstd -T0 -19 "$IMGFILE" -o "output/ps5-${{ matrix.distro }}.img.zst"
+          ls -lh output/
+
+      # On uploade l'image compressée comme artefact inter-jobs
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps5-${{ matrix.distro }}-img
+          path: ps5-linux-image/output/ps5-${{ matrix.distro }}.img.zst
+          retention-days: 1
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job de release : attend tous les builds, publie sur GitHub
+  # ─────────────────────────────────────────────────────────────────
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write   # nécessaire pour créer une release
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
+
+      - name: List downloaded files
+        run: ls -lh release-assets/
+
+      # Génère des checksums SHA256 pour tous les fichiers
+      - name: Generate checksums
+        working-directory: release-assets
+        run: |
+          sha256sum *.zst > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Crée la release GitHub et attache tous les fichiers
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "PS5 Linux — ${{ env.RELEASE_TAG }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## PS5 Linux Images — ${{ env.RELEASE_TAG }}
+
+            Images Linux bootables pour PS5 Phat (firmware 3.xx / 4.xx).
+
+            ### Distributions incluses
+
+            | Fichier | Distribution | Desktop | Init |
+            |---------|-------------|---------|------|
+            | `ps5-ubuntu2604.img.zst` | Ubuntu 26.04 (Resolute) | GNOME | systemd |
+            | `ps5-ubuntu2404.img.zst` | Ubuntu 24.04 (Noble) | GNOME | systemd |
+            | `ps5-arch.img.zst` | Arch Linux | Sway | systemd |
+            | `ps5-alpine.img.zst` | Alpine 3.21 | GNOME | OpenRC |
+
+            ### Utilisation
+
+            1. Décompresser l'image :
+               ```bash
+               zstd -d ps5-ubuntu2604.img.zst
+               ```
+            2. Flasher sur une clé USB (min. 64 Go) :
+               ```bash
+               sudo dd if=ps5-ubuntu2604.img of=/dev/sdX bs=4M status=progress conv=fsync
+               ```
+            3. Suivre les instructions d'installation sur [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader).
+
+            ### Vérification d'intégrité
+            Vérifiez les checksums SHA256 avec le fichier `SHA256SUMS.txt` joint.
+
+          files: |
+            release-assets/*.zst
+            release-assets/SHA256SUMS.txt
