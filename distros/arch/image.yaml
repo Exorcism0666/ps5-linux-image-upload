@@ -118,6 +118,9 @@ actions:
   action: |-
     #!/bin/bash
     set -eux
+    # Pacman 7 Landlock sandbox is unsupported under QEMU; disable it.
+    sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
+
     # Initialise pacman keyring
     pacman-key --init
     pacman-key --populate archlinux
@@ -175,7 +178,7 @@ actions:
 
     # Install custom kernel packages
     if ls /opt/pkgs/*.pkg.tar.zst 1>/dev/null 2>&1; then
-        pacman -U --noconfirm /opt/pkgs/*.pkg.tar.zst
+        pacman -U --noconfirm --ask 4 /opt/pkgs/*.pkg.tar.zst
         rm -rf /opt/pkgs
         KVER=$(ls -1t /lib/modules | head -1)
         # mkinitcpio may warn about missing optional modules; don't fail on those
