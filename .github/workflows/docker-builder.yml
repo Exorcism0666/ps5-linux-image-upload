@@ -13,14 +13,14 @@ on:
         type: choice
         options:
           - ubuntu2604
-          - ubuntu2404
+          - cachyos
           - arch
           - alpine
           - all
       tag_name:
-        description: 'Release tag (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v1.0.1)'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.0.1'
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
