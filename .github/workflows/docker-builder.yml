@@ -154,6 +154,14 @@ jobs:
                ```
             3. Suivre les instructions sur [ps5-linux-loader](https://github.com/ps5-linux/ps5-linux-loader).
 
+            ### Archlinux and Alpine-linux
+            login: ps5
+            password: ps5
+
+            ### CachyOS
+            login: steam
+            password: steam
+
             ### Vérification d'intégrité
             Vérifiez les checksums SHA256 avec le fichier `SHA256SUMS.txt` joint.
 
