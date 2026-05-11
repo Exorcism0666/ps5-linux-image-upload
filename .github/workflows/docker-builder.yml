@@ -60,7 +60,7 @@ jobs:
 
       - name: Free up disk space
         if: steps.check.outputs.skip != 'true'
-        uses: jlumbroso/free-disk-space@main
+        uses: insightsengineering/disk-space-reclaimer@main
         with:
           tool-cache: true
           android: true
